@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "taski (debug)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "taski",
+      "program": "lib/main.dart"
+    },
+    {
+      "name": "taski (profile)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "taski",
+      "program": "lib/main.dart",
+      "flutterMode": "profile"
+    },
+    {
+      "name": "taski (release)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "taski",
+      "program": "lib/main.dart",
+      "flutterMode": "release"
+    }
+  ]
+}
