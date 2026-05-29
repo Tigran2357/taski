@@ -25,3 +25,11 @@ Color colorFromHex(String hex) {
   final cleaned = hex.replaceFirst('#', '');
   return Color(int.parse('FF$cleaned', radix: 16));
 }
+
+/// Returns a darker shade of [color] by reducing its lightness by [amount]
+/// (0.0–1.0). Used for borders that should read as "the darker version" of a
+/// banner's background.
+Color darken(Color color, [double amount = 0.3]) {
+  final hsl = HSLColor.fromColor(color);
+  return hsl.withLightness((hsl.lightness - amount).clamp(0.0, 1.0)).toColor();
+}

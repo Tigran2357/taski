@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +8,9 @@ import 'package:taski/models/task.dart';
 import 'package:taski/services/notification_service.dart';
 import 'package:taski/services/tasks_repository.dart';
 import 'package:taski/theme/task_colors.dart';
+import 'package:taski/widgets/bouncy_button.dart';
 import 'package:taski/widgets/confirm_dialog.dart';
+import 'package:taski/widgets/theme_toggle.dart';
 import 'package:taski/widgets/timer_card.dart';
 import 'package:taski/widgets/timer_setup_dialog.dart';
 
@@ -95,28 +98,57 @@ class _FolderPageState extends State<FolderPage> {
 
   Future<String?> _prompt(String title, {String? initial}) {
     final controller = TextEditingController(text: initial);
+    void save() {
+      final text = controller.text.trim();
+      if (text.isNotEmpty) Navigator.pop(context, text);
+    }
+
     return showDialog<String>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Task'),
+      builder: (ctx) => Dialog(
+        insetAnimationDuration: const Duration(milliseconds: 250),
+        insetAnimationCurve: Curves.easeOutCubic,
+        child: ConstrainedBox(
+          // Cap height so a 26-line task never overflows the screen.
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.75,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(title, style: Theme.of(ctx).textTheme.titleLarge),
+                const SizedBox(height: 16),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: TextField(
+                      controller: controller,
+                      autofocus: true,
+                      minLines: 1,
+                      maxLines: 26,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      decoration: const InputDecoration(hintText: 'Task'),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(onPressed: save, child: const Text('Save')),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isNotEmpty) Navigator.pop(context, text);
-            },
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
   }
@@ -164,6 +196,7 @@ class _FolderPageState extends State<FolderPage> {
     );
     if (result == null) return;
     await _repo.setTimer(task.id, result.start, result.end);
+    await _notif.scheduleStart(task.id, task.title, result.start);
     await _notif.scheduleDeadline(task.id, task.title, result.end);
     setState(() {
       task.timerTotalSeconds = result.end.difference(result.start).inSeconds;
@@ -260,6 +293,15 @@ class _FolderPageState extends State<FolderPage> {
           const SizedBox(height: 12),
           const Divider(height: 1),
           const SizedBox(height: 12),
+          if (task.isPending())
+            ListTile(
+              leading: const Icon(Icons.cancel_schedule_send, color: Colors.red),
+              title: const Text('Cancel schedule', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(context);
+                _resetTimer(task);
+              },
+            ),
           ListTile(
             leading: const Icon(Icons.delete, color: Colors.red),
             title: const Text('Delete', style: TextStyle(color: Colors.red)),
@@ -328,17 +370,23 @@ class _FolderPageState extends State<FolderPage> {
     final tasks = widget.folder.tasks;
     final now = DateTime.now();
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(
-          widget.folder.name,
-          style: const TextStyle(fontWeight: FontWeight.bold),
+        title: ThemeToggleTap(
+          child: Text(
+            widget.folder.name,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
         ),
         centerTitle: true,
         elevation: 0.0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.add, color: Colors.black),
+            icon: Icon(
+              Icons.add,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white
+                  : Colors.black,
+            ),
             onPressed: _addTask,
           ),
         ],
@@ -353,10 +401,25 @@ class _FolderPageState extends State<FolderPage> {
                 final base = t.color != null ? colorFromHex(t.color!) : null;
                 final active = t.isTimerVisible(now);
                 final progress = active ? t.timerProgress(now) : null;
+                final isDark = Theme.of(context).brightness == Brightness.dark;
+                final hasCustomColor = base != null;
+                // On a coloured banner we stick to light-mode text (dark on
+                // pastel) for legibility, regardless of theme.
+                final completedColor = hasCustomColor
+                    ? Colors.grey
+                    : (isDark ? Colors.white : Colors.grey);
                 final textColor = active
                     ? Colors.white
-                    : (t.completed ? Colors.grey : null);
-                final showPause = t.isRunning(now) || t.isPending(now);
+                    : t.completed
+                    ? completedColor
+                    : (hasCustomColor ? Colors.black : null);
+                final showPause = t.isRunning(now);
+                final isPending = t.isPending(now);
+                // Border = a darker shade of the current banner background.
+                final bannerColor = active
+                    ? kTimerRed
+                    : (base ?? Theme.of(context).cardColor);
+                final borderColor = darken(bannerColor, 0.25);
                 return RawGestureDetector(
                   gestures: {
                     LongPressGestureRecognizer:
@@ -373,12 +436,46 @@ class _FolderPageState extends State<FolderPage> {
                   child: TimerCard(
                     baseColor: base,
                     progress: progress,
-                    child: ListTile(
+                    child: isPending && !t.completed
+                        ? Stack(
+                            children: [
+                              ListTile(
+                                contentPadding: const EdgeInsets.only(
+                                  left: 16,
+                                  right: 52,
+                                ),
+                                leading: Checkbox(
+                                  value: t.completed,
+                                  onChanged: (_) => _toggleTask(t),
+                                  side: BorderSide(color: borderColor, width: 2),
+                                ),
+                                title: Text(
+                                  t.title,
+                                  style: TextStyle(
+                                    color: textColor,
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                right: 0,
+                                top: 0,
+                                bottom: 0,
+                                child: _ScheduledChip(
+                                  start: t.timerStart!,
+                                  hasCustomColor: hasCustomColor,
+                                  isDark: isDark,
+                                  isTall: '\n'.allMatches(t.title).length >= 3,
+                                ),
+                              ),
+                            ],
+                          )
+                        : ListTile(
                       leading: active
                           ? null
                           : Checkbox(
                               value: t.completed,
                               onChanged: (_) => _toggleTask(t),
+                              side: BorderSide(color: borderColor, width: 2),
                             ),
                       title: Text(
                         t.title,
@@ -389,23 +486,126 @@ class _FolderPageState extends State<FolderPage> {
                           color: textColor,
                         ),
                       ),
-                      trailing: IconButton(
-                        iconSize: 32,
-                        icon: Icon(
-                          showPause
-                              ? Icons.pause_circle_filled
-                              : Icons.play_circle_fill,
-                        ),
-                        color: active
-                            ? Colors.white
-                            : Theme.of(context).colorScheme.primary,
-                        onPressed: () => _onPlayPause(t),
-                      ),
+                      trailing: t.completed
+                          ? null
+                          : BouncyIconButton(
+                              icon: showPause
+                                  ? Icons.pause_circle_filled
+                                  : Icons.play_circle_fill,
+                              color: active
+                                  ? Colors.white
+                                  : Colors.lightBlueAccent,
+                              borderColor: borderColor,
+                              onPressed: () => _onPlayPause(t),
+                            ),
                     ),
                   ),
                 );
               },
             ),
+    );
+  }
+}
+
+/// Pill shown when a timer is scheduled but not yet running.
+/// Short tasks: compact 2-char label (or icon+label).
+/// 3+ line tasks: Column (icon on top, full label below) — same look as screenshot.
+class _ScheduledChip extends StatelessWidget {
+  final DateTime start;
+  final bool hasCustomColor;
+  final bool isDark;
+  final bool isTall;
+  const _ScheduledChip({
+    required this.start,
+    required this.hasCustomColor,
+    required this.isDark,
+    this.isTall = false,
+  });
+
+  // Short label for compact layout.
+  String _shortLabel() {
+    final diff = start.difference(DateTime.now());
+    if (diff.inMinutes < 10) return '${diff.inMinutes.clamp(0, 9)}m';
+    if (diff.inMinutes < 60) return '<1h';
+    return '${diff.inHours}h';
+  }
+
+  // Full label for tall layout: "in 1h 57m" style.
+  String _fullLabel() {
+    final diff = start.difference(DateTime.now());
+    String two(int n) => n.toString().padLeft(2, '0');
+    if (diff.inMinutes < 60) return 'in ${diff.inMinutes}m';
+    final h = diff.inHours;
+    final m = diff.inMinutes % 60;
+    return m > 0 ? 'in ${h}h ${two(m)}m' : 'in ${h}h';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = hasCustomColor ? Colors.black87 : Colors.white;
+    final bg = hasCustomColor
+        ? Colors.black.withValues(alpha: 0.12)
+        : Colors.white.withValues(alpha: 0.13);
+    final textStyle = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w700,
+      color: fg,
+    );
+
+    // Tall tasks: Column (icon top, label below) rotated quarterTurns:1
+    // so it reads top→bottom like the screenshot.
+    // Short tasks: compact rotated Row.
+    final Widget content;
+    if (isTall) {
+      content = RotatedBox(
+        quarterTurns: 3,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.schedule_rounded, size: 14, color: fg),
+            const SizedBox(height: 4),
+            Text(_fullLabel(), style: textStyle),
+          ],
+        ),
+      );
+    } else {
+      final label = _shortLabel();
+      final short = label.length <= 2;
+      content = RotatedBox(
+        quarterTurns: 3,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!short) ...[
+              Icon(Icons.schedule_rounded, size: 12, color: fg),
+              const SizedBox(width: 3),
+            ],
+            Text(label, style: textStyle),
+          ],
+        ),
+      );
+    }
+
+    // All corners rounded to match the card's 12px border radius.
+    const radius = BorderRadius.only(
+      topRight: Radius.circular(12),
+      bottomRight: Radius.circular(12),
+    );
+    return ClipRRect(
+      borderRadius: radius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: Container(
+          width: 44,
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: radius,
+            border: Border.all(color: fg.withValues(alpha: 0.2), width: 0.8),
+          ),
+          alignment: Alignment.center,
+          child: content,
+        ),
+      ),
     );
   }
 }

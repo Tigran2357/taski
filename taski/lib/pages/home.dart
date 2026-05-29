@@ -3,11 +3,16 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:taski/models/folder.dart';
+import 'package:taski/models/task.dart';
 import 'package:taski/pages/folder_page.dart';
+import 'package:taski/pages/friends_page.dart';
 import 'package:taski/services/auth_service.dart';
 import 'package:taski/services/folders_repository.dart';
+import 'package:taski/services/friends_service.dart';
+import 'package:taski/services/notification_service.dart';
 import 'package:taski/theme/task_colors.dart';
 import 'package:taski/widgets/confirm_dialog.dart';
+import 'package:taski/widgets/theme_toggle.dart';
 import 'package:taski/widgets/timer_card.dart';
 import 'package:taski/widgets/top_toast.dart';
 
@@ -21,9 +26,13 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _repo = FoldersRepository();
   final _auth = AuthService();
+  final _friends = FriendsService();
   List<Folder> _folders = [];
   bool _loading = true;
+  bool _hasPendingRequests = false;
+  final Set<String> _knownRequestIds = {};
   Timer? _ticker;
+  Timer? _friendsPoller;
 
   @override
   void initState() {
@@ -34,13 +43,44 @@ class _HomePageState extends State<HomePage> {
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
+    // Poll for incoming friend requests; first call seeds the known set so we
+    // don't spam notifications for already-pending ones at launch.
+    _refreshPending(initial: true);
+    _friendsPoller = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _refreshPending(),
+    );
   }
 
   @override
   void dispose() {
     _ticker?.cancel();
+    _friendsPoller?.cancel();
     super.dispose();
   }
+
+  Future<void> _refreshPending({bool initial = false}) async {
+    try {
+      final items = await _friends.pending();
+      final newIds = items.map((r) => r.id).toSet();
+      if (!initial) {
+        for (final r in items) {
+          if (!_knownRequestIds.contains(r.id)) {
+            await NotificationService.instance.showFriendRequest(
+              r.senderUsername,
+            );
+          }
+        }
+      }
+      _knownRequestIds
+        ..clear()
+        ..addAll(newIds);
+      if (mounted) setState(() => _hasPendingRequests = items.isNotEmpty);
+    } catch (_) {
+      // Ignore transient errors; we'll try again on the next poll.
+    }
+  }
+
 
   Future<void> _welcome() async {
     final name = await _auth.currentName();
@@ -61,28 +101,44 @@ class _HomePageState extends State<HomePage> {
 
   Future<String?> _prompt(String title, {String? initial}) {
     final controller = TextEditingController(text: initial);
+    void save() {
+      final text = controller.text.trim();
+      if (text.isNotEmpty) Navigator.pop(context, text);
+    }
+
     return showDialog<String>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Folder name'),
+      builder: (ctx) => Dialog(
+        insetAnimationDuration: const Duration(milliseconds: 250),
+        insetAnimationCurve: Curves.easeOutCubic,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(title, style: Theme.of(ctx).textTheme.titleLarge),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: const InputDecoration(hintText: 'Folder name'),
+                onSubmitted: (_) => save(),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(onPressed: save, child: const Text('Save')),
+                ],
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isNotEmpty) Navigator.pop(context, text);
-            },
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
   }
@@ -214,11 +270,12 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text(
-          'My Tasks',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: const ThemeToggleTap(
+          child: Text(
+            'TaskLand',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
         ),
         centerTitle: true,
         elevation: 0.0,
@@ -230,6 +287,27 @@ class _HomePageState extends State<HomePage> {
             }
           },
         ),
+        actions: [
+          Badge(
+            isLabelVisible: _hasPendingRequests,
+            backgroundColor: Colors.green,
+            smallSize: 9,
+            alignment: AlignmentDirectional.topEnd,
+            offset: const Offset(-10, 8),
+            child: IconButton(
+              icon: const Icon(Icons.people_outline),
+              tooltip: 'Friends',
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const FriendsPage()),
+                );
+                // After returning, refresh badge state.
+                _refreshPending();
+              },
+            ),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -245,7 +323,12 @@ class _HomePageState extends State<HomePage> {
                 final timerTask = f.activeTimerTask;
                 final active = timerTask != null;
                 final progress = active ? timerTask.timerProgress() : null;
-                final textColor = active ? Colors.white : null;
+                final hasCustomColor = base != null;
+                // Coloured folders keep light-mode (dark) text so the pastel
+                // background stays readable even in dark mode.
+                final textColor = active
+                    ? Colors.white
+                    : (hasCustomColor ? Colors.black : null);
                 return RawGestureDetector(
                   gestures: {
                     LongPressGestureRecognizer:
@@ -274,14 +357,10 @@ class _HomePageState extends State<HomePage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const SizedBox(height: 6),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: LinearProgressIndicator(
-                              value: f.progress,
-                              minHeight: 6,
-                              color: active ? Colors.white : null,
-                              backgroundColor: active ? Colors.white24 : null,
-                            ),
+                          _SegmentedBar(
+                            tasks: f.tasks,
+                            isActive: active,
+                            hasCustomColor: hasCustomColor,
                           ),
                           const SizedBox(height: 4),
                           Text(
@@ -300,6 +379,59 @@ class _HomePageState extends State<HomePage> {
         onPressed: _addFolder,
         child: const Icon(Icons.add),
       ),
+    );
+  }
+}
+
+/// A row of small rounded segments — one per task — filled if the task is done.
+class _SegmentedBar extends StatelessWidget {
+  final List<Task> tasks;
+  final bool isActive;
+  final bool hasCustomColor;
+
+  const _SegmentedBar({
+    required this.tasks,
+    required this.isActive,
+    required this.hasCustomColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (tasks.isEmpty) {
+      return const SizedBox(height: 6);
+    }
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color doneColor;
+    final Color emptyColor;
+    if (isActive) {
+      doneColor = Colors.white;
+      emptyColor = Colors.white24;
+    } else if (hasCustomColor) {
+      doneColor = Colors.black54;
+      emptyColor = Colors.black12;
+    } else if (isDark) {
+      doneColor = Colors.white;
+      emptyColor = Colors.white24;
+    } else {
+      doneColor = Theme.of(context).colorScheme.primary;
+      emptyColor = Theme.of(context).colorScheme.primary.withValues(alpha: 0.18);
+    }
+    return Row(
+      children: [
+        for (int i = 0; i < tasks.length; i++) ...[
+          if (i > 0) const SizedBox(width: 3),
+          Expanded(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              height: 6,
+              decoration: BoxDecoration(
+                color: tasks[i].completed ? doneColor : emptyColor,
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

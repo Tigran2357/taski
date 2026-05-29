@@ -22,13 +22,25 @@ class TimerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // A soft greyish-white glow to lift banners off the dark background.
+    final shadowColor = isDark ? const Color(0x66FFFFFF) : null;
+    final elevation = isDark ? 4.0 : null;
+
     if (progress == null) {
-      return Card(color: baseColor, child: child);
+      return Card(
+        color: baseColor,
+        shadowColor: shadowColor,
+        elevation: elevation,
+        child: child,
+      );
     }
     final base = baseColor ?? Theme.of(context).colorScheme.surface;
     final redWidth = (1 - progress!).clamp(0.0, 1.0);
     return Card(
       clipBehavior: Clip.antiAlias,
+      shadowColor: shadowColor,
+      elevation: elevation,
       child: Stack(
         children: [
           // Original colour underneath (revealed from the right as time passes).

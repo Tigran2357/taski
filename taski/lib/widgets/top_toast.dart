@@ -62,38 +62,44 @@ class _TopToastState extends State<_TopToast>
       top: 0,
       left: 0,
       right: 0,
-      child: SlideTransition(
-        position: _offset,
-        child: SafeArea(
+      child: SafeArea(
+        child: SlideTransition(
+          position: _offset,
           child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Material(
-              elevation: 6,
-              borderRadius: BorderRadius.circular(12),
-              color: Colors.black87,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.celebration,
-                      color: Colors.white,
-                      size: 20,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 280),
+                child: Material(
+                  elevation: 6,
+                  borderRadius: BorderRadius.circular(28),
+                  color: Colors.black87,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        widget.message,
-                        style: const TextStyle(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.celebration,
                           color: Colors.white,
-                          fontWeight: FontWeight.w600,
+                          size: 18,
                         ),
-                      ),
+                        const SizedBox(width: 10),
+                        Flexible(
+                          child: Text(
+                            widget.message,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),

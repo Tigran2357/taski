@@ -20,7 +20,15 @@ class TasksRepository {
   }
 
   Future<void> setCompleted(String id, bool completed) async {
-    await supabase.from('tasks').update({'completed': completed}).eq('id', id);
+    await supabase
+        .from('tasks')
+        .update({
+          'completed': completed,
+          'completed_at': completed
+              ? DateTime.now().toUtc().toIso8601String()
+              : null,
+        })
+        .eq('id', id);
   }
 
   Future<void> setColor(String id, String? color) async {

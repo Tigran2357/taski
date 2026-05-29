@@ -18,6 +18,7 @@ class NotificationService {
   // creation, so bumping the suffix forces fresh settings without a reinstall.
   static const _countdownChannelId = 'task_timer_countdown_v2';
   static const _alertChannelId = 'task_timer_alert_v2';
+  static const _friendChannelId = 'taski_friends_v1';
 
   Future<void> init() async {
     tzdata.initializeTimeZones();
@@ -58,6 +59,31 @@ class NotificationService {
         vibrationPattern: Int64List.fromList([0, 400]),
       ),
     );
+    await android_?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _friendChannelId,
+        'Friend requests',
+        description: 'New friend requests',
+        importance: Importance.high,
+      ),
+    );
+  }
+
+  Future<void> showFriendRequest(String senderUsername) async {
+    await _plugin.show(
+      id: 'friend_req:$senderUsername'.hashCode & 0x7fffffff,
+      title: 'New friend request',
+      body: '$senderUsername wants to be your friend',
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _friendChannelId,
+          'Friend requests',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(presentSound: true),
+      ),
+    );
   }
 
   Future<void> requestPermissions() async {
@@ -76,6 +102,7 @@ class NotificationService {
 
   int _countdownId(String taskId) => taskId.hashCode & 0x7fffffff;
   int _alertId(String taskId) => '$taskId:alert'.hashCode & 0x7fffffff;
+  int _startId(String taskId) => '$taskId:start'.hashCode & 0x7fffffff;
 
   /// Shows / updates the ongoing countdown for a task.
   Future<void> showCountdown(String taskId, String title, String body) async {
@@ -125,14 +152,45 @@ class NotificationService {
     );
   }
 
+  /// Schedules a "task started" alert at [start] for a timer set to begin
+  /// in the future. No-op effect if [start] is already in the past.
+  Future<void> scheduleStart(
+    String taskId,
+    String title,
+    DateTime start,
+  ) async {
+    if (!start.isAfter(DateTime.now())) return;
+    final when = tz.TZDateTime.from(start, tz.local);
+    await _plugin.zonedSchedule(
+      id: _startId(taskId),
+      title: 'Task started',
+      body: title,
+      scheduledDate: when,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _alertChannelId,
+          'Task timer finished',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(presentSound: true),
+      ),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    );
+  }
+
   Future<void> cancelCountdown(String taskId) =>
       _plugin.cancel(id: _countdownId(taskId));
 
   Future<void> cancelAlert(String taskId) =>
       _plugin.cancel(id: _alertId(taskId));
 
+  Future<void> cancelStart(String taskId) =>
+      _plugin.cancel(id: _startId(taskId));
+
   Future<void> cancel(String taskId) async {
     await cancelCountdown(taskId);
     await cancelAlert(taskId);
+    await cancelStart(taskId);
   }
 }

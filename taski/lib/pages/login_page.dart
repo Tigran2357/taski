@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:taski/services/auth_service.dart';
+import 'package:taski/widgets/theme_toggle.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -113,11 +114,12 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text(
-          _isSignUp ? 'Create account' : 'Sign in',
-          style: const TextStyle(fontWeight: FontWeight.bold),
+        title: ThemeToggleTap(
+          child: Text(
+            _isSignUp ? 'Create account' : 'Sign in',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
         ),
         centerTitle: true,
         elevation: 0.0,

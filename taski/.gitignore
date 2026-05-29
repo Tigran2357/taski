@@ -1,6 +1,9 @@
 # Environment variables
 .env
 !.env.example
+####
+.claude
+.vscode
 
 # Miscellaneous
 *.class

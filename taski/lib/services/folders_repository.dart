@@ -12,7 +12,9 @@ class FoldersRepository {
           'timer_start, timer_end, timer_paused, timer_remaining_seconds)',
         )
         .eq('user_id', userId)
-        .order('created_at');
+        .order('created_at')
+        // Keep tasks within each folder in a stable, consistent order.
+        .order('created_at', referencedTable: 'tasks');
     return (rows as List)
         .map((r) => Folder.fromMap(r as Map<String, dynamic>))
         .toList();
