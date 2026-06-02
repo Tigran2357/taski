@@ -180,7 +180,31 @@ class _FolderPageState extends State<FolderPage> {
   }
 
   Future<void> _toggleTask(Task task) async {
-    await _repo.setCompleted(task.id, !task.completed);
+    final completing = !task.completed;
+    // Checking a scheduled (not-yet-started) task: confirm cancelling its timer.
+    if (completing && task.isPending()) {
+      final cancel = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Cancel schedule?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('No'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Yes'),
+            ),
+          ],
+        ),
+      );
+      if (cancel != true) return; // keep the schedule, leave it unchecked
+      await _repo.clearTimer(task.id);
+      await _notif.cancel(task.id);
+      _shownCountdowns.remove(task.id);
+    }
+    await _repo.setCompleted(task.id, completing);
   }
 
   Future<void> _setColor(Task task, String? color) async {
@@ -263,9 +287,12 @@ class _FolderPageState extends State<FolderPage> {
                 _resetTimer(task);
               },
             ),
-          const SizedBox(height: 12),
-          const Divider(height: 1),
-          const SizedBox(height: 12),
+          // Divider only when there's a destructive action below it.
+          if (task.isPending() || !task.completed) ...[
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+          ],
           if (task.isPending())
             ListTile(
               leading: const Icon(Icons.cancel_schedule_send, color: Colors.red),
@@ -275,16 +302,18 @@ class _FolderPageState extends State<FolderPage> {
                 _resetTimer(task);
               },
             ),
-          ListTile(
-            leading: const Icon(Icons.delete, color: Colors.red),
-            title: const Text('Delete', style: TextStyle(color: Colors.red)),
-            onTap: () async {
-              Navigator.pop(context);
-              if (await confirmDialog(context, message: 'Delete this task?')) {
-                _deleteTask(task);
-              }
-            },
-          ),
+          // Completed tasks can't be deleted, so their count never drops.
+          if (!task.completed)
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text('Delete', style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                Navigator.pop(context);
+                if (await confirmDialog(context, message: 'Delete this task?')) {
+                  _deleteTask(task);
+                }
+              },
+            ),
         ],
       ),
     );

@@ -69,6 +69,25 @@ class NotificationService {
     );
   }
 
+  /// Shows a friend-milestone push when it arrives while the app is open.
+  /// (When the app is backgrounded/closed, the OS shows the FCM payload itself.)
+  Future<void> showFriendMilestone(String title, String body) async {
+    await _plugin.show(
+      id: DateTime.now().millisecondsSinceEpoch.remainder(1 << 31),
+      title: title,
+      body: body,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _friendChannelId,
+          'Friend requests',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(presentSound: true),
+      ),
+    );
+  }
+
   Future<void> showFriendRequest(String senderUsername) async {
     await _plugin.show(
       id: 'friend_req:$senderUsername'.hashCode & 0x7fffffff,

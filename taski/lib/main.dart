@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:taski/pages/auth_gate.dart';
 import 'package:taski/services/notification_service.dart';
 import 'package:taski/services/powersync/powersync_db.dart';
+import 'package:taski/services/push_service.dart';
 import 'package:taski/services/supabase_client.dart';
 
 /// Globally-readable theme mode. Toggled by double-tapping the app title.
@@ -38,7 +39,19 @@ Future<void> main() async {
   // and works offline. Background sync is started inside (not awaited).
   await _initPowerSync();
 
+  // FCM for milestone push. Guarded: no-op until Firebase is configured.
+  _initPush();
+
   runApp(const MyApp());
+}
+
+Future<void> _initPush() async {
+  try {
+    await PushService.instance.init();
+    debugPrint('Push: initialized');
+  } catch (e) {
+    debugPrint('Push init skipped (Firebase not configured?): $e');
+  }
 }
 
 Future<void> _initPowerSync() async {

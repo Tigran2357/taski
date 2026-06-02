@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "610660364113",
+    "project_id": "taski-notifs-40333",
+    "storage_bucket": "taski-notifs-40333.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:610660364113:android:d7e2da4839d759e35aad70",
+        "android_client_info": {
+          "package_name": "com.example.taski"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDQWxndJB2QxIEcNrOwy6OHjztpPEtauOM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
