@@ -1,3 +1,4 @@
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:taski/services/supabase_client.dart';
 
 /// Outcome of a sign-up attempt.
@@ -36,23 +37,43 @@ class AuthService {
 
   Future<void> signOut() => supabase.auth.signOut();
 
-  /// Returns the saved name for the logged-in user, or null if they haven't
-  /// set one yet.
+  String _nameKey(String uid) => 'profile_name_$uid';
+
+  /// Returns the saved name for the logged-in user, or null if not set.
+  ///
+  /// Reads a local cache first so it works offline and never throws — the
+  /// `users` table isn't synced by PowerSync, so a direct query would fail with
+  /// no network and hang the auth gate. Only hits Supabase if uncached.
   Future<String?> currentName() async {
     final user = supabase.auth.currentUser;
     if (user == null) return null;
-    final row = await supabase
-        .from('users')
-        .select('name')
-        .eq('id', user.id)
-        .maybeSingle();
-    return row?['name'] as String?;
+
+    final prefs = await SharedPreferences.getInstance();
+    final cached = prefs.getString(_nameKey(user.id));
+    if (cached != null && cached.isNotEmpty) return cached;
+
+    try {
+      final row = await supabase
+          .from('users')
+          .select('name')
+          .eq('id', user.id)
+          .maybeSingle();
+      final name = row?['name'] as String?;
+      if (name != null && name.isNotEmpty) {
+        await prefs.setString(_nameKey(user.id), name);
+      }
+      return name;
+    } catch (_) {
+      return null; // offline and not cached yet
+    }
   }
 
-  /// Saves the profile row for the logged-in user. Runs after login, so a
-  /// session exists and the row passes the RLS check.
+  /// Saves the profile row for the logged-in user. Caches locally first, then
+  /// writes to Supabase. Runs after login, so RLS passes.
   Future<void> saveName(String name) async {
     final user = supabase.auth.currentUser!;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_nameKey(user.id), name);
     await supabase.from('users').upsert({
       'id': user.id,
       'email': user.email,

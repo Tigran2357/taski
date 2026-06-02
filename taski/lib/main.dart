@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -35,10 +33,10 @@ Future<void> main() async {
   await NotificationService.instance.init();
   await NotificationService.instance.requestPermissions();
 
-  // Offline-first cache. Runs in the background so it never blocks the first
-  // frame, and is fully guarded: until POWERSYNC_URL is set in .env it does
-  // nothing, so the app keeps working with direct Supabase calls as before.
-  unawaited(_initPowerSync());
+  // Open the local database BEFORE the UI builds, so the repositories' watch
+  // streams have a ready `db`. This is local-only (no network), so it's fast
+  // and works offline. Background sync is started inside (not awaited).
+  await _initPowerSync();
 
   runApp(const MyApp());
 }
@@ -46,11 +44,14 @@ Future<void> main() async {
 Future<void> _initPowerSync() async {
   // No-op until POWERSYNC_URL is set in .env, so the app keeps working with
   // direct Supabase calls until the offline layer is fully wired (Phase 2).
-  if ((dotenv.env['POWERSYNC_URL'] ?? '').isEmpty) return;
+  final url = dotenv.env['POWERSYNC_URL'] ?? '';
+  debugPrint('PS: init start, url=${url.isEmpty ? "(empty)" : "set"}');
+  if (url.isEmpty) return;
   try {
     await openPowerSync(); // opens local db + manages sync via auth state
-  } catch (e) {
-    debugPrint('PowerSync init skipped: $e');
+    debugPrint('PS: openPowerSync done');
+  } catch (e, st) {
+    debugPrint('PS: init FAILED: $e\n$st');
   }
 }
 

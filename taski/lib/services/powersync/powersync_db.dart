@@ -23,17 +23,22 @@ Future<String> _dbPath() async {
 /// The local open is fast (no network); sync runs in the background.
 Future<void> openPowerSync() async {
   if (_opened) return;
-  db = PowerSyncDatabase(schema: schema, path: await _dbPath());
+  final path = await _dbPath();
+  debugPrint('PS: opening db at $path');
+  db = PowerSyncDatabase(schema: schema, path: path);
   await db.initialize();
   _opened = true;
+  debugPrint('PS: db initialized');
 
   final auth = Supabase.instance.client.auth;
   SupabaseConnector? connector;
 
   // Connect now if already logged in.
+  debugPrint('PS: session=${auth.currentSession != null}');
   if (auth.currentSession != null) {
     connector = SupabaseConnector(db);
     db.connect(connector: connector);
+    debugPrint('PS: connect() called');
   }
 
   // Connect on login, clear on logout, refresh creds on token refresh.

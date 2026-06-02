@@ -297,6 +297,14 @@ class _HomePageState extends State<HomePage> {
       body: StreamBuilder<List<Folder>>(
         stream: _foldersStream,
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('Could not load: ${snapshot.error}'),
+              ),
+            );
+          }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
