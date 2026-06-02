@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:taski/pages/auth_gate.dart';
 import 'package:taski/services/notification_service.dart';
+import 'package:taski/services/powersync/powersync_db.dart';
 import 'package:taski/services/supabase_client.dart';
 
 /// Globally-readable theme mode. Toggled by double-tapping the app title.
@@ -30,7 +34,24 @@ Future<void> main() async {
   await initSupabase();
   await NotificationService.instance.init();
   await NotificationService.instance.requestPermissions();
+
+  // Offline-first cache. Runs in the background so it never blocks the first
+  // frame, and is fully guarded: until POWERSYNC_URL is set in .env it does
+  // nothing, so the app keeps working with direct Supabase calls as before.
+  unawaited(_initPowerSync());
+
   runApp(const MyApp());
+}
+
+Future<void> _initPowerSync() async {
+  // No-op until POWERSYNC_URL is set in .env, so the app keeps working with
+  // direct Supabase calls until the offline layer is fully wired (Phase 2).
+  if ((dotenv.env['POWERSYNC_URL'] ?? '').isEmpty) return;
+  try {
+    await openPowerSync(); // opens local db + manages sync via auth state
+  } catch (e) {
+    debugPrint('PowerSync init skipped: $e');
+  }
 }
 
 // Built once — never recreated on theme toggle so no full tree rebuild.

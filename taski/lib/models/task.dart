@@ -3,6 +3,9 @@ DateTime? _parseDate(dynamic value) =>
 
 int? _parseInt(dynamic value) => (value as num?)?.toInt();
 
+/// Supabase returns real bools; local SQLite returns 0/1 ints. Accept both.
+bool _parseBool(dynamic value) => value == true || value == 1;
+
 class Task {
   final String id;
   final String folderId;
@@ -84,12 +87,12 @@ class Task {
     id: map['id'] as String,
     folderId: map['folder_id'] as String,
     title: map['title'] as String,
-    completed: map['completed'] as bool? ?? false,
+    completed: _parseBool(map['completed']),
     color: map['color'] as String?,
     timerTotalSeconds: _parseInt(map['timer_total_seconds']),
     timerStart: _parseDate(map['timer_start']),
     timerEnd: _parseDate(map['timer_end']),
-    timerPaused: map['timer_paused'] as bool? ?? false,
+    timerPaused: _parseBool(map['timer_paused']),
     timerRemainingSeconds: _parseInt(map['timer_remaining_seconds']),
   );
 }

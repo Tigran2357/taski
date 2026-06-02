@@ -26,11 +26,21 @@ class _FolderPageState extends State<FolderPage> {
   final _repo = TasksRepository();
   final _notif = NotificationService.instance;
   final Set<String> _shownCountdowns = {};
+  // Tasks for this folder, kept live from the local SQLite watch stream.
+  List<Task> _tasks = [];
+  StreamSubscription<List<Task>>? _sub;
+  // Guards against the ticker re-completing a task before the stream catches up.
+  final Set<String> _completing = {};
   Timer? _ticker;
 
   @override
   void initState() {
     super.initState();
+    // Seed with whatever the folder already had, then keep it live.
+    _tasks = widget.folder.tasks;
+    _sub = _repo.watch(widget.folder.id).listen((tasks) {
+      if (mounted) setState(() => _tasks = tasks);
+    });
     // Rebuild every second so running timers animate their fill, and refresh
     // the live countdown notifications.
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -44,28 +54,25 @@ class _FolderPageState extends State<FolderPage> {
   /// When a task's timer runs out, mark it complete and clear the spent timer.
   void _completeFinishedTimers() {
     final now = DateTime.now();
-    for (final t in widget.folder.tasks) {
-      if (t.isDone(now)) _completeFromTimer(t);
+    for (final t in _tasks) {
+      if (t.isDone(now) && !_completing.contains(t.id)) {
+        _completeFromTimer(t);
+      }
     }
   }
 
   Future<void> _completeFromTimer(Task task) async {
-    setState(() {
-      task.completed = true;
-      task.timerTotalSeconds = null;
-      task.timerStart = null;
-      task.timerEnd = null;
-      task.timerPaused = false;
-      task.timerRemainingSeconds = null;
-    });
+    _completing.add(task.id);
     _shownCountdowns.remove(task.id);
     await _notif.cancelCountdown(task.id);
     await _repo.setCompleted(task.id, true);
     await _repo.clearTimer(task.id);
+    _completing.remove(task.id);
   }
 
   @override
   void dispose() {
+    _sub?.cancel();
     _ticker?.cancel();
     super.dispose();
   }
@@ -79,7 +86,7 @@ class _FolderPageState extends State<FolderPage> {
   /// Keeps each task's ongoing countdown notification in sync with its state.
   void _syncNotifications() {
     final now = DateTime.now();
-    for (final t in widget.folder.tasks) {
+    for (final t in _tasks) {
       if (t.isRunning(now)) {
         _notif.showCountdown(t.id, t.title, '${_fmtDuration(t.remaining(now))} left');
         _shownCountdowns.add(t.id);
@@ -153,40 +160,31 @@ class _FolderPageState extends State<FolderPage> {
     );
   }
 
+  // Mutations write to local SQLite; the watch stream refreshes the UI.
   Future<void> _addTask() async {
     final title = await _prompt('New task');
     if (title == null) return;
-    final task = await _repo.create(folderId: widget.folder.id, title: title);
-    setState(() => widget.folder.tasks.add(task));
+    await _repo.create(folderId: widget.folder.id, title: title);
   }
 
   Future<void> _renameTask(Task task) async {
     final title = await _prompt('Rename task', initial: task.title);
     if (title == null) return;
     await _repo.rename(task.id, title);
-    setState(() => task.title = title);
   }
 
   Future<void> _deleteTask(Task task) async {
     await _repo.delete(task.id);
     await _notif.cancel(task.id);
     _shownCountdowns.remove(task.id);
-    setState(() => widget.folder.tasks.remove(task));
   }
 
   Future<void> _toggleTask(Task task) async {
-    final next = !task.completed;
-    setState(() => task.completed = next); // optimistic: update UI first
-    try {
-      await _repo.setCompleted(task.id, next);
-    } catch (_) {
-      if (mounted) setState(() => task.completed = !next); // revert on failure
-    }
+    await _repo.setCompleted(task.id, !task.completed);
   }
 
   Future<void> _setColor(Task task, String? color) async {
     await _repo.setColor(task.id, color);
-    setState(() => task.color = color);
   }
 
   Future<void> _setTimer(Task task) async {
@@ -198,24 +196,12 @@ class _FolderPageState extends State<FolderPage> {
     await _repo.setTimer(task.id, result.start, result.end);
     await _notif.scheduleStart(task.id, task.title, result.start);
     await _notif.scheduleDeadline(task.id, task.title, result.end);
-    setState(() {
-      task.timerTotalSeconds = result.end.difference(result.start).inSeconds;
-      task.timerStart = result.start;
-      task.timerEnd = result.end;
-      task.timerPaused = false;
-      task.timerRemainingSeconds = null;
-    });
   }
 
   Future<void> _pauseTimer(Task task) async {
     final remaining = task.remaining().inSeconds;
     await _repo.pauseTimer(task.id, remaining);
     await _notif.cancelAlert(task.id);
-    setState(() {
-      task.timerPaused = true;
-      task.timerRemainingSeconds = remaining;
-      task.timerEnd = null;
-    });
   }
 
   Future<void> _resumeTimer(Task task) async {
@@ -226,12 +212,6 @@ class _FolderPageState extends State<FolderPage> {
     final end = now.add(Duration(seconds: remaining));
     await _repo.resumeTimer(task.id, start, end);
     await _notif.scheduleDeadline(task.id, task.title, end);
-    setState(() {
-      task.timerPaused = false;
-      task.timerStart = start;
-      task.timerEnd = end;
-      task.timerRemainingSeconds = null;
-    });
   }
 
   void _onPlayPause(Task task) {
@@ -249,13 +229,6 @@ class _FolderPageState extends State<FolderPage> {
     await _repo.clearTimer(task.id);
     await _notif.cancel(task.id);
     _shownCountdowns.remove(task.id);
-    setState(() {
-      task.timerTotalSeconds = null;
-      task.timerStart = null;
-      task.timerEnd = null;
-      task.timerPaused = false;
-      task.timerRemainingSeconds = null;
-    });
   }
 
   /// Opened by holding a task. Shown centered; Delete is set apart below.
@@ -367,7 +340,7 @@ class _FolderPageState extends State<FolderPage> {
 
   @override
   Widget build(BuildContext context) {
-    final tasks = widget.folder.tasks;
+    final tasks = _tasks;
     final now = DateTime.now();
     return Scaffold(
       appBar: AppBar(

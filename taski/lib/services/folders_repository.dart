@@ -1,44 +1,64 @@
 import 'package:taski/models/folder.dart';
+import 'package:taski/services/powersync/powersync_db.dart';
 import 'package:taski/services/supabase_client.dart';
 
+/// All reads/writes go to the local PowerSync SQLite database.
+/// PowerSync syncs those changes with Supabase in the background.
 class FoldersRepository {
-  Future<List<Folder>> fetchAll() async {
-    final userId = supabase.auth.currentUser!.id;
-    final rows = await supabase
-        .from('folders')
-        .select(
-          'id, name, color, '
-          'tasks(id, folder_id, title, completed, color, timer_total_seconds, '
-          'timer_start, timer_end, timer_paused, timer_remaining_seconds)',
+  /// Live stream of folders, each with its tasks embedded.
+  /// Re-emits when either `folders` or `tasks` changes (offline-aware).
+  Stream<List<Folder>> watchAll() {
+    return db
+        .watch(
+          'SELECT * FROM folders ORDER BY created_at',
+          // Folders' task progress depends on the tasks table too, so re-run
+          // whenever either table changes.
+          triggerOnTables: const ['folders', 'tasks'],
         )
-        .eq('user_id', userId)
-        .order('created_at')
-        // Keep tasks within each folder in a stable, consistent order.
-        .order('created_at', referencedTable: 'tasks');
-    return (rows as List)
-        .map((r) => Folder.fromMap(r as Map<String, dynamic>))
-        .toList();
+        .asyncMap((folderRows) async {
+          final folders = <Folder>[];
+          for (final fr in folderRows) {
+            final taskRows = await db.getAll(
+              'SELECT * FROM tasks WHERE folder_id = ? ORDER BY created_at',
+              [fr['id']],
+            );
+            folders.add(
+              Folder.fromMap({
+                ...Map<String, dynamic>.from(fr),
+                'tasks': taskRows
+                    .map((r) => Map<String, dynamic>.from(r))
+                    .toList(),
+              }),
+            );
+          }
+          return folders;
+        });
   }
 
-  Future<Folder> create(String name) async {
+  Future<void> create(String name) async {
     final userId = supabase.auth.currentUser!.id;
-    final row = await supabase
-        .from('folders')
-        .insert({'name': name, 'user_id': userId})
-        .select('id, name, color')
-        .single();
-    return Folder.fromMap(row);
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.execute(
+      'INSERT INTO folders(id, user_id, name, created_at) '
+      'VALUES(uuid(), ?, ?, ?)',
+      [userId, name, now],
+    );
   }
 
   Future<void> rename(String id, String name) async {
-    await supabase.from('folders').update({'name': name}).eq('id', id);
+    await db.execute('UPDATE folders SET name = ? WHERE id = ?', [name, id]);
   }
 
   Future<void> setColor(String id, String? color) async {
-    await supabase.from('folders').update({'color': color}).eq('id', id);
+    await db.execute('UPDATE folders SET color = ? WHERE id = ?', [color, id]);
   }
 
+  /// Deletes a folder and its tasks. Local SQLite has no FK cascade, so we
+  /// remove the tasks explicitly in the same transaction.
   Future<void> delete(String id) async {
-    await supabase.from('folders').delete().eq('id', id);
+    await db.writeTransaction((tx) async {
+      await tx.execute('DELETE FROM tasks WHERE folder_id = ?', [id]);
+      await tx.execute('DELETE FROM folders WHERE id = ?', [id]);
+    });
   }
 }

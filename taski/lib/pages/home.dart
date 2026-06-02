@@ -27,8 +27,8 @@ class _HomePageState extends State<HomePage> {
   final _repo = FoldersRepository();
   final _auth = AuthService();
   final _friends = FriendsService();
-  List<Folder> _folders = [];
-  bool _loading = true;
+  // Live stream of folders (+ their tasks) from local SQLite.
+  late final Stream<List<Folder>> _foldersStream = _repo.watchAll();
   bool _hasPendingRequests = false;
   final Set<String> _knownRequestIds = {};
   Timer? _ticker;
@@ -37,7 +37,6 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _load();
     WidgetsBinding.instance.addPostFrameCallback((_) => _welcome());
     // Rebuild every second so a folder's timer fill animates.
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -88,17 +87,6 @@ class _HomePageState extends State<HomePage> {
     showTopToast(context, 'Welcome ${name ?? ''}'.trim());
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
-      final folders = await _repo.fetchAll();
-      if (!mounted) return;
-      setState(() => _folders = folders);
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
   Future<String?> _prompt(String title, {String? initial}) {
     final controller = TextEditingController(text: initial);
     void save() {
@@ -143,28 +131,25 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // Mutations just write to local SQLite; the watch stream updates the UI.
   Future<void> _addFolder() async {
     final name = await _prompt('New folder');
     if (name == null) return;
-    final folder = await _repo.create(name);
-    setState(() => _folders.add(folder));
+    await _repo.create(name);
   }
 
   Future<void> _renameFolder(Folder folder) async {
     final name = await _prompt('Rename folder', initial: folder.name);
     if (name == null) return;
     await _repo.rename(folder.id, name);
-    setState(() => folder.name = name);
   }
 
   Future<void> _deleteFolder(Folder folder) async {
     await _repo.delete(folder.id);
-    setState(() => _folders.remove(folder));
   }
 
   Future<void> _setColor(Folder folder, String? color) async {
     await _repo.setColor(folder.id, color);
-    setState(() => folder.color = color);
   }
 
   /// Opened by holding a folder. Shown centered; Delete is set apart below.
@@ -309,15 +294,23 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _folders.isEmpty
-          ? const Center(child: Text('No folders yet. Tap + to add one.'))
-          : ListView.builder(
+      body: StreamBuilder<List<Folder>>(
+        stream: _foldersStream,
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final folders = snapshot.data!;
+          if (folders.isEmpty) {
+            return const Center(
+              child: Text('No folders yet. Tap + to add one.'),
+            );
+          }
+          return ListView.builder(
               padding: const EdgeInsets.all(12),
-              itemCount: _folders.length,
+              itemCount: folders.length,
               itemBuilder: (_, i) {
-                final f = _folders[i];
+                final f = folders[i];
                 final done = f.tasks.where((t) => t.completed).length;
                 final base = f.color != null ? colorFromHex(f.color!) : null;
                 final timerTask = f.activeTimerTask;
@@ -374,7 +367,9 @@ class _HomePageState extends State<HomePage> {
                   ),
                 );
               },
-            ),
+            );
+        },
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: _addFolder,
         child: const Icon(Icons.add),

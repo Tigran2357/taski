@@ -44,7 +44,7 @@ class _TopToastState extends State<_TopToast>
 
   Future<void> _run() async {
     await _controller.forward();
-    await Future.delayed(const Duration(seconds: 3));
+    await Future.delayed(const Duration(seconds: 1));
     if (!mounted) return;
     await _controller.reverse();
     widget.onDismissed();
