@@ -11,7 +11,9 @@ class TasksRepository {
   Stream<List<Task>> watch(String folderId) {
     return db
         .watch(
-          'SELECT * FROM tasks WHERE folder_id = ? ORDER BY created_at',
+          // Incomplete first (newest on top), completed sink to the bottom.
+          'SELECT * FROM tasks WHERE folder_id = ? '
+          'ORDER BY completed ASC, created_at DESC',
           parameters: [folderId],
         )
         .map(

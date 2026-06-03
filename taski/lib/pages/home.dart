@@ -419,6 +419,9 @@ class _SegmentedBar extends StatelessWidget {
       doneColor = Theme.of(context).colorScheme.primary;
       emptyColor = Theme.of(context).colorScheme.primary.withValues(alpha: 0.18);
     }
+    // Fill the leftmost N segments where N = number of completed tasks,
+    // so the bar always fills left→right regardless of which tasks are done.
+    final doneCount = tasks.where((t) => t.completed).length;
     return Row(
       children: [
         for (int i = 0; i < tasks.length; i++) ...[
@@ -428,7 +431,7 @@ class _SegmentedBar extends StatelessWidget {
               duration: const Duration(milliseconds: 300),
               height: 6,
               decoration: BoxDecoration(
-                color: tasks[i].completed ? doneColor : emptyColor,
+                color: i < doneCount ? doneColor : emptyColor,
                 borderRadius: BorderRadius.circular(3),
               ),
             ),

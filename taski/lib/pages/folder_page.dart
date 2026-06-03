@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -417,11 +416,14 @@ class _FolderPageState extends State<FolderPage> {
                     : (hasCustomColor ? Colors.black : null);
                 final showPause = t.isRunning(now);
                 final isPending = t.isPending(now);
-                // Border = a darker shade of the current banner background.
+                // Border: white in dark mode (default banner), otherwise a
+                // darker shade of the current banner background.
                 final bannerColor = active
                     ? kTimerRed
                     : (base ?? Theme.of(context).cardColor);
-                final borderColor = darken(bannerColor, 0.25);
+                final borderColor = isDark && !hasCustomColor
+                    ? Colors.white
+                    : darken(bannerColor, 0.25);
                 return RawGestureDetector(
                   gestures: {
                     LongPressGestureRecognizer:
@@ -435,7 +437,10 @@ class _FolderPageState extends State<FolderPage> {
                               instance.onLongPress = () => _showActions(t),
                         ),
                   },
-                  child: TimerCard(
+                  // Completed tasks fade to 70% opacity.
+                  child: Opacity(
+                    opacity: t.completed ? 0.7 : 1.0,
+                    child: TimerCard(
                     baseColor: base,
                     progress: progress,
                     child: isPending && !t.completed
@@ -501,6 +506,7 @@ class _FolderPageState extends State<FolderPage> {
                               onPressed: () => _onPlayPause(t),
                             ),
                     ),
+                  ),
                   ),
                 );
               },
@@ -593,21 +599,16 @@ class _ScheduledChip extends StatelessWidget {
       topRight: Radius.circular(12),
       bottomRight: Radius.circular(12),
     );
-    return ClipRRect(
-      borderRadius: radius,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-        child: Container(
-          width: 44,
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: radius,
-            border: Border.all(color: fg.withValues(alpha: 0.2), width: 0.8),
-          ),
-          alignment: Alignment.center,
-          child: content,
-        ),
+    // Flat translucent pill (no blur — far cheaper to render in a list).
+    return Container(
+      width: 44,
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: radius,
+        border: Border.all(color: fg.withValues(alpha: 0.2), width: 0.8),
       ),
+      alignment: Alignment.center,
+      child: content,
     );
   }
 }
