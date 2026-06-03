@@ -25,11 +25,18 @@ final schema = Schema([
     Column.integer('timer_remaining_seconds'),
     Column.text('archived_at'),
     Column.text('completed_at'),
+    Column.text('creator_name'),
   ]),
   Table('folders', [
     Column.text('name'),
     Column.text('created_at'),
     Column.text('user_id'),
     Column.text('color'),
+    Column.integer('is_public'),
+  ]),
+  Table('folder_members', [
+    Column.text('folder_id'),
+    Column.text('user_id'),
+    Column.text('joined_at'),
   ]),
 ]);

@@ -1,10 +1,13 @@
 import 'package:taski/models/task.dart';
+import 'package:taski/services/auth_service.dart';
 import 'package:taski/services/powersync/powersync_db.dart';
 import 'package:taski/services/supabase_client.dart';
 
 /// All reads/writes go to the local PowerSync SQLite database.
 /// PowerSync syncs those changes with Supabase in the background.
 class TasksRepository {
+  final _auth = AuthService();
+
   String _nowIso() => DateTime.now().toUtc().toIso8601String();
 
   /// Live stream of a folder's tasks. Emits immediately and on every change.
@@ -25,10 +28,12 @@ class TasksRepository {
 
   Future<void> create({required String folderId, required String title}) async {
     final userId = supabase.auth.currentUser!.id;
+    final creatorName = await _auth.currentName(); // cached → fast & offline-safe
     await db.execute(
       'INSERT INTO tasks(id, folder_id, user_id, title, completed, '
-      'timer_paused, created_at) VALUES(uuid(), ?, ?, ?, 0, 0, ?)',
-      [folderId, userId, title, _nowIso()],
+      'timer_paused, created_at, creator_name) '
+      'VALUES(uuid(), ?, ?, ?, 0, 0, ?, ?)',
+      [folderId, userId, title, _nowIso(), creatorName],
     );
   }
 

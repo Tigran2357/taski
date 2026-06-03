@@ -1,0 +1,26 @@
+# PowerSync Sync Streams (edition 3) — paste into Dashboard → Sync Streams.
+#
+# Membership-based sync via JOINs (edition 3 supports joins in stream queries).
+# Each member syncs every folder they belong to + that folder's tasks. Because
+# the owner is always a member, this also covers private folders.
+#
+# The client doesn't read folder_members locally (the server uses it), so it is
+# not synced down — one less thing to break.
+
+config:
+  edition: 3
+
+streams:
+  member_folders:
+    auto_subscribe: true
+    query: >
+      SELECT folders.* FROM folders
+      JOIN folder_members ON folder_members.folder_id = folders.id
+      WHERE folder_members.user_id = auth.user_id()
+
+  member_tasks:
+    auto_subscribe: true
+    query: >
+      SELECT tasks.* FROM tasks
+      JOIN folder_members ON folder_members.folder_id = tasks.folder_id
+      WHERE folder_members.user_id = auth.user_id()

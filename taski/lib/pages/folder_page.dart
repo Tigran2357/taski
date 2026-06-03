@@ -82,6 +82,16 @@ class _FolderPageState extends State<FolderPage> {
     return h > 0 ? '${two(h)}:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
   }
 
+  /// "14:32" if created today, else "06/03 14:32".
+  String _fmtCreated(DateTime? d) {
+    if (d == null) return '';
+    String two(int n) => n.toString().padLeft(2, '0');
+    final now = DateTime.now();
+    final time = '${two(d.hour)}:${two(d.minute)}';
+    final sameDay = d.year == now.year && d.month == now.month && d.day == now.day;
+    return sameDay ? time : '${two(d.month)}/${two(d.day)} $time';
+  }
+
   /// Keeps each task's ongoing countdown notification in sync with its state.
   void _syncNotifications() {
     final now = DateTime.now();
@@ -493,6 +503,18 @@ class _FolderPageState extends State<FolderPage> {
                           color: textColor,
                         ),
                       ),
+                      // Attribution in shared folders: who created it + when.
+                      subtitle: widget.folder.isPublic && t.creatorName != null
+                          ? Text(
+                              'by ${t.creatorName} · ${_fmtCreated(t.createdAt)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: (textColor ?? Colors.grey).withValues(
+                                  alpha: 0.7,
+                                ),
+                              ),
+                            )
+                          : null,
                       trailing: t.completed
                           ? null
                           : BouncyIconButton(

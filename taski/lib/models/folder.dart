@@ -8,8 +8,16 @@ class Folder {
   /// Hex color for the folder banner, e.g. '#90CAF9'. Null = default card color.
   String? color;
 
-  Folder({required this.id, required this.name, List<Task>? tasks, this.color})
-    : tasks = tasks ?? [];
+  /// Shared (public) folder — invitees can collaborate.
+  final bool isPublic;
+
+  Folder({
+    required this.id,
+    required this.name,
+    List<Task>? tasks,
+    this.color,
+    this.isPublic = false,
+  }) : tasks = tasks ?? [];
 
   double get progress => tasks.isEmpty
       ? 0
@@ -32,6 +40,7 @@ class Folder {
     id: map['id'] as String,
     name: map['name'] as String,
     color: map['color'] as String?,
+    isPublic: map['is_public'] == true || map['is_public'] == 1,
     tasks: (map['tasks'] as List? ?? [])
         .map((t) => Task.fromMap(t as Map<String, dynamic>))
         .toList(),

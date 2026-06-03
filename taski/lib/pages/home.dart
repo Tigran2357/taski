@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:taski/models/folder.dart';
+import 'package:taski/models/friend.dart';
 import 'package:taski/models/task.dart';
 import 'package:taski/pages/folder_page.dart';
 import 'package:taski/pages/friends_page.dart';
@@ -74,7 +75,13 @@ class _HomePageState extends State<HomePage> {
       _knownRequestIds
         ..clear()
         ..addAll(newIds);
-      if (mounted) setState(() => _hasPendingRequests = items.isNotEmpty);
+      // Badge also reflects pending folder invites.
+      final invites = await _friends.pendingFolderInvites();
+      if (mounted) {
+        setState(
+          () => _hasPendingRequests = items.isNotEmpty || invites.isNotEmpty,
+        );
+      }
     } catch (_) {
       // Ignore transient errors; we'll try again on the next poll.
     }
@@ -132,10 +139,51 @@ class _HomePageState extends State<HomePage> {
   }
 
   // Mutations just write to local SQLite; the watch stream updates the UI.
-  Future<void> _addFolder() async {
-    final name = await _prompt('New folder');
+  /// Tapped + → choose a private or public (shared) folder.
+  Future<void> _onAddPressed() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.folder),
+              title: const Text('Create folder'),
+              onTap: () => Navigator.pop(context, 'private'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.group),
+              title: const Text('Create public folder'),
+              subtitle: const Text('Invite friends to collaborate'),
+              onTap: () => Navigator.pop(context, 'public'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == 'private') {
+      _addFolder(isPublic: false);
+    } else if (choice == 'public') {
+      _addFolder(isPublic: true);
+    }
+  }
+
+  Future<void> _addFolder({required bool isPublic}) async {
+    final name = await _prompt(isPublic ? 'New public folder' : 'New folder');
     if (name == null) return;
-    await _repo.create(name);
+    final id = await _repo.create(name, isPublic: isPublic);
+    if (isPublic && mounted) {
+      await _showInviteDialog(id);
+    }
+  }
+
+  /// Lists friends with an Invite button each, for a public folder.
+  Future<void> _showInviteDialog(String folderId) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _InviteFriendsDialog(folderId: folderId),
+    );
   }
 
   Future<void> _renameFolder(Folder folder) async {
@@ -347,12 +395,25 @@ class _HomePageState extends State<HomePage> {
                     baseColor: base,
                     progress: progress,
                     child: ListTile(
-                      title: Text(
-                        f.name,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: textColor,
-                        ),
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              f.name,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: textColor,
+                              ),
+                            ),
+                          ),
+                          // Public (shared) folders show a friends icon.
+                          if (f.isPublic)
+                            Icon(
+                              Icons.group,
+                              size: 18,
+                              color: textColor ?? Colors.grey,
+                            ),
+                        ],
                       ),
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -379,9 +440,103 @@ class _HomePageState extends State<HomePage> {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _addFolder,
+        onPressed: _onAddPressed,
         child: const Icon(Icons.add),
       ),
+    );
+  }
+}
+
+/// Dialog listing the user's friends, each with an Invite button, for adding
+/// them to a public folder.
+class _InviteFriendsDialog extends StatefulWidget {
+  final String folderId;
+  const _InviteFriendsDialog({required this.folderId});
+
+  @override
+  State<_InviteFriendsDialog> createState() => _InviteFriendsDialogState();
+}
+
+class _InviteFriendsDialogState extends State<_InviteFriendsDialog> {
+  final _service = FriendsService();
+  List<Friend> _friends = [];
+  bool _loading = true;
+  final Set<String> _invited = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final friends = await _service.myFriends();
+      if (!mounted) return;
+      setState(() {
+        _friends = friends;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _invite(Friend f) async {
+    setState(() => _invited.add(f.userId));
+    try {
+      await _service.inviteToFolder(widget.folderId, f.username);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _invited.remove(f.userId));
+      // Surface the real reason (e.g. not_owner → folder not synced yet).
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Invite failed: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Invite friends'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: _loading
+            ? const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            : _friends.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('No friends yet. Add some from the Friends page.'),
+              )
+            : ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final f in _friends)
+                    ListTile(
+                      title: Text(f.username),
+                      trailing: _invited.contains(f.userId)
+                          ? const Text(
+                              'Invited',
+                              style: TextStyle(color: Colors.green),
+                            )
+                          : TextButton(
+                              onPressed: () => _invite(f),
+                              child: const Text('Invite'),
+                            ),
+                    ),
+                ],
+              ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Done'),
+        ),
+      ],
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:taski/models/folder_invite.dart';
 import 'package:taski/models/friend_request.dart';
 import 'package:taski/models/leaderboard_entry.dart';
 import 'package:taski/services/friends_service.dart';
@@ -191,6 +192,7 @@ class _RequestsTab extends StatefulWidget {
 class _RequestsTabState extends State<_RequestsTab> {
   final _service = FriendsService();
   List<FriendRequest> _items = [];
+  List<FolderInvite> _invites = [];
   bool _loading = true;
 
   @override
@@ -199,13 +201,21 @@ class _RequestsTabState extends State<_RequestsTab> {
     _load();
   }
 
+  int get _total => _items.length + _invites.length;
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final items = await _service.pending();
+      final results = await Future.wait([
+        _service.pending(),
+        _service.pendingFolderInvites(),
+      ]);
       if (!mounted) return;
-      setState(() => _items = items);
-      widget.onPendingChanged(items.length);
+      setState(() {
+        _items = results[0] as List<FriendRequest>;
+        _invites = results[1] as List<FolderInvite>;
+      });
+      widget.onPendingChanged(_total);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -215,14 +225,28 @@ class _RequestsTabState extends State<_RequestsTab> {
     await _service.accept(r.id);
     if (!mounted) return;
     setState(() => _items.remove(r));
-    widget.onPendingChanged(_items.length);
+    widget.onPendingChanged(_total);
   }
 
   Future<void> _decline(FriendRequest r) async {
     await _service.decline(r.id);
     if (!mounted) return;
     setState(() => _items.remove(r));
-    widget.onPendingChanged(_items.length);
+    widget.onPendingChanged(_total);
+  }
+
+  Future<void> _acceptInvite(FolderInvite inv) async {
+    await _service.acceptFolderInvite(inv.id);
+    if (!mounted) return;
+    setState(() => _invites.remove(inv));
+    widget.onPendingChanged(_total);
+  }
+
+  Future<void> _declineInvite(FolderInvite inv) async {
+    await _service.declineFolderInvite(inv.id);
+    if (!mounted) return;
+    setState(() => _invites.remove(inv));
+    widget.onPendingChanged(_total);
   }
 
   @override
@@ -230,39 +254,72 @@ class _RequestsTabState extends State<_RequestsTab> {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_items.isEmpty) {
-      return const Center(child: Text('No incoming requests.'));
+    if (_total == 0) {
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          children: const [
+            SizedBox(height: 200),
+            Center(child: Text('No incoming requests.')),
+          ],
+        ),
+      );
     }
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView.builder(
+      child: ListView(
         padding: const EdgeInsets.all(12),
-        itemCount: _items.length,
-        itemBuilder: (_, i) {
-          final r = _items[i];
-          return Card(
-            child: ListTile(
-              title: Text(
-                r.senderUsername,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: const Text('wants to be your friend'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.check, color: Colors.green),
-                    onPressed: () => _accept(r),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.red),
-                    onPressed: () => _decline(r),
-                  ),
-                ],
+        children: [
+          // Folder invites first.
+          for (final inv in _invites)
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.group),
+                title: Text(
+                  inv.folderName,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text('${inv.senderUsername} invited you to this folder'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.check, color: Colors.green),
+                      onPressed: () => _acceptInvite(inv),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.red),
+                      onPressed: () => _declineInvite(inv),
+                    ),
+                  ],
+                ),
               ),
             ),
-          );
-        },
+          // Then friend requests.
+          for (final r in _items)
+            Card(
+              child: ListTile(
+                title: Text(
+                  r.senderUsername,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: const Text('wants to be your friend'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.check, color: Colors.green),
+                      onPressed: () => _accept(r),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.red),
+                      onPressed: () => _decline(r),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

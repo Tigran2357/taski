@@ -56,6 +56,11 @@ class SupabaseConnector extends PowerSyncBackendConnector {
     CrudEntry? lastOp;
     try {
       for (final op in transaction.crud) {
+
+        if (op.table == 'folder_members') {
+          continue;
+        }
+
         lastOp = op;
         final table = rest.from(op.table);
         switch (op.op) {

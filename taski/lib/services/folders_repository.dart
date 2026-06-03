@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:taski/models/folder.dart';
 import 'package:taski/services/powersync/powersync_db.dart';
 import 'package:taski/services/supabase_client.dart';
+import 'package:uuid/uuid.dart';
 
 /// All reads/writes go to the local PowerSync SQLite database.
 /// PowerSync syncs those changes with Supabase in the background.
@@ -47,14 +48,19 @@ class FoldersRepository {
         });
   }
 
-  Future<void> create(String name) async {
+  /// Creates a folder and returns its id (needed to invite friends to a
+  /// public folder). The owner membership row is added server-side by a
+  /// trigger. The id is generated client-side so we can use it immediately.
+  Future<String> create(String name, {bool isPublic = false}) async {
     final userId = supabase.auth.currentUser!.id;
+    final id = const Uuid().v4();
     final now = DateTime.now().toUtc().toIso8601String();
     await db.execute(
-      'INSERT INTO folders(id, user_id, name, created_at) '
-      'VALUES(uuid(), ?, ?, ?)',
-      [userId, name, now],
+      'INSERT INTO folders(id, user_id, name, created_at, is_public) '
+      'VALUES(?, ?, ?, ?, ?)',
+      [id, userId, name, now, isPublic ? 1 : 0],
     );
+    return id;
   }
 
   Future<void> rename(String id, String name) async {

@@ -24,6 +24,10 @@ class Task {
   bool timerPaused;
   int? timerRemainingSeconds;
 
+  /// Attribution (for shared folders): who created it and when.
+  final String? creatorName;
+  final DateTime? createdAt;
+
   Task({
     required this.id,
     required this.folderId,
@@ -35,6 +39,8 @@ class Task {
     this.timerEnd,
     this.timerPaused = false,
     this.timerRemainingSeconds,
+    this.creatorName,
+    this.createdAt,
   });
 
   bool get hasTimer => timerTotalSeconds != null;
@@ -94,5 +100,7 @@ class Task {
     timerEnd: _parseDate(map['timer_end']),
     timerPaused: _parseBool(map['timer_paused']),
     timerRemainingSeconds: _parseInt(map['timer_remaining_seconds']),
+    creatorName: map['creator_name'] as String?,
+    createdAt: _parseDate(map['created_at']),
   );
 }
