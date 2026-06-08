@@ -11,12 +11,16 @@ class Folder {
   /// Shared (public) folder — invitees can collaborate.
   final bool isPublic;
 
+  /// The owner's user id (folders.user_id). Used to gate owner-only actions.
+  final String? ownerId;
+
   Folder({
     required this.id,
     required this.name,
     List<Task>? tasks,
     this.color,
     this.isPublic = false,
+    this.ownerId,
   }) : tasks = tasks ?? [];
 
   double get progress => tasks.isEmpty
@@ -41,6 +45,7 @@ class Folder {
     name: map['name'] as String,
     color: map['color'] as String?,
     isPublic: map['is_public'] == true || map['is_public'] == 1,
+    ownerId: map['user_id'] as String?,
     tasks: (map['tasks'] as List? ?? [])
         .map((t) => Task.fromMap(t as Map<String, dynamic>))
         .toList(),

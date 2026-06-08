@@ -24,3 +24,10 @@ streams:
       SELECT tasks.* FROM tasks
       JOIN folder_members ON folder_members.folder_id = tasks.folder_id
       WHERE folder_members.user_id = auth.user_id()
+
+  member_events:
+    auto_subscribe: true
+    query: >
+      SELECT folder_events.* FROM folder_events
+      JOIN folder_members ON folder_members.folder_id = folder_events.folder_id
+      WHERE folder_members.user_id = auth.user_id()

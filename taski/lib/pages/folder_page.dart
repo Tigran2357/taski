@@ -1,11 +1,15 @@
 import 'dart:async';
 
+import 'package:animated_reorderable_list/animated_reorderable_list.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:taski/models/folder.dart';
 import 'package:taski/models/task.dart';
+import 'package:taski/pages/member_log_page.dart';
 import 'package:taski/services/notification_service.dart';
+import 'package:taski/services/supabase_client.dart';
 import 'package:taski/services/tasks_repository.dart';
+import 'package:taski/widgets/invite_friends_dialog.dart';
 import 'package:taski/theme/task_colors.dart';
 import 'package:taski/widgets/bouncy_button.dart';
 import 'package:taski/widgets/confirm_dialog.dart';
@@ -382,11 +386,55 @@ class _FolderPageState extends State<FolderPage> {
     final now = DateTime.now();
     return Scaffold(
       appBar: AppBar(
-        title: ThemeToggleTap(
-          child: Text(
-            widget.folder.name,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: ThemeToggleTap(
+                child: Text(
+                  widget.folder.name,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            // Public folders: dropdown for the member log + invite (owner).
+            if (widget.folder.isPublic)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.arrow_drop_down),
+                onSelected: (v) {
+                  if (v == 'log') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MemberLogPage(
+                          folderId: widget.folder.id,
+                          folderName: widget.folder.name,
+                        ),
+                      ),
+                    );
+                  } else if (v == 'invite') {
+                    showDialog<void>(
+                      context: context,
+                      builder: (_) =>
+                          InviteFriendsDialog(folderId: widget.folder.id),
+                    );
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'log',
+                    child: Text('Members log'),
+                  ),
+                  if (widget.folder.ownerId ==
+                      supabase.auth.currentUser?.id)
+                    const PopupMenuItem(
+                      value: 'invite',
+                      child: Text('Invite friends'),
+                    ),
+                ],
+              ),
+          ],
         ),
         centerTitle: true,
         elevation: 0.0,
@@ -404,10 +452,22 @@ class _FolderPageState extends State<FolderPage> {
       ),
       body: tasks.isEmpty
           ? const Center(child: Text('No tasks yet. Tap + to add one.'))
-          : ListView.builder(
+          : AnimatedListView<Task>(
+              items: tasks,
               padding: const EdgeInsets.all(12),
-              itemCount: tasks.length,
-              itemBuilder: (_, i) {
+              isSameItem: (a, b) => a.id == b.id,
+              // Fast, smooth: checked tasks glide to the bottom; add/remove fade.
+              // Effect durations MUST match insert/removeDuration, otherwise the
+              // package's interval (effectDur / total) can exceed 1.0 and assert.
+              enterTransition: [
+                FadeIn(duration: const Duration(milliseconds: 250)),
+              ],
+              exitTransition: [
+                FadeIn(duration: const Duration(milliseconds: 250)),
+              ],
+              insertDuration: const Duration(milliseconds: 250),
+              removeDuration: const Duration(milliseconds: 250),
+              itemBuilder: (context, i) {
                 final t = tasks[i];
                 final base = t.color != null ? colorFromHex(t.color!) : null;
                 final active = t.isTimerVisible(now);
@@ -435,6 +495,7 @@ class _FolderPageState extends State<FolderPage> {
                     ? Colors.white
                     : darken(bannerColor, 0.25);
                 return RawGestureDetector(
+                  key: ValueKey(t.id),
                   gestures: {
                     LongPressGestureRecognizer:
                         GestureRecognizerFactoryWithHandlers<
@@ -503,10 +564,15 @@ class _FolderPageState extends State<FolderPage> {
                           color: textColor,
                         ),
                       ),
-                      // Attribution in shared folders: who created it + when.
-                      subtitle: widget.folder.isPublic && t.creatorName != null
+                      // Attribution in shared folders: who completed it (once
+                      // checked) or who created it.
+                      subtitle: widget.folder.isPublic
                           ? Text(
-                              'by ${t.creatorName} · ${_fmtCreated(t.createdAt)}',
+                              t.completed
+                                  ? 'completed by ${t.completedByName ?? '?'} · ${_fmtCreated(t.completedAt)}'
+                                  : (t.creatorName != null
+                                        ? 'by ${t.creatorName} · ${_fmtCreated(t.createdAt)}'
+                                        : ''),
                               style: TextStyle(
                                 fontSize: 12,
                                 color: (textColor ?? Colors.grey).withValues(

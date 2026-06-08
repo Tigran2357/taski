@@ -72,4 +72,9 @@ class FriendsService {
   Future<void> declineFolderInvite(String id) async {
     await supabase.rpc('decline_folder_invite', params: {'p_id': id});
   }
+
+  /// Non-owner leaves a public folder (logs a "left" event server-side).
+  Future<void> leaveFolder(String folderId) async {
+    await supabase.rpc('leave_folder', params: {'p_folder_id': folderId});
+  }
 }

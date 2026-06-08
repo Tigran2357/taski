@@ -1,3 +1,4 @@
+import 'package:taski/models/folder_event.dart';
 import 'package:taski/models/task.dart';
 import 'package:taski/services/auth_service.dart';
 import 'package:taski/services/powersync/powersync_db.dart';
@@ -26,6 +27,20 @@ class TasksRepository {
         );
   }
 
+  /// Live stream of a folder's join/leave activity, oldest first.
+  Stream<List<FolderEvent>> watchEvents(String folderId) {
+    return db
+        .watch(
+          'SELECT * FROM folder_events WHERE folder_id = ? ORDER BY created_at',
+          parameters: [folderId],
+        )
+        .map(
+          (rows) => rows
+              .map((r) => FolderEvent.fromMap(Map<String, dynamic>.from(r)))
+              .toList(),
+        );
+  }
+
   Future<void> create({required String folderId, required String title}) async {
     final userId = supabase.auth.currentUser!.id;
     final creatorName = await _auth.currentName(); // cached → fast & offline-safe
@@ -42,9 +57,12 @@ class TasksRepository {
   }
 
   Future<void> setCompleted(String id, bool completed) async {
+    // Stamp who completed it (cached name → fast & offline-safe); clear on uncheck.
+    final byName = completed ? await _auth.currentName() : null;
     await db.execute(
-      'UPDATE tasks SET completed = ?, completed_at = ? WHERE id = ?',
-      [completed ? 1 : 0, completed ? _nowIso() : null, id],
+      'UPDATE tasks SET completed = ?, completed_at = ?, completed_by_name = ? '
+      'WHERE id = ?',
+      [completed ? 1 : 0, completed ? _nowIso() : null, byName, id],
     );
   }
 

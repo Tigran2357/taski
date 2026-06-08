@@ -2,20 +2,24 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:taski/models/folder.dart';
-import 'package:taski/models/friend.dart';
 import 'package:taski/models/task.dart';
 import 'package:taski/pages/folder_page.dart';
 import 'package:taski/pages/friends_page.dart';
 import 'package:taski/services/auth_service.dart';
+import 'package:taski/services/folder_color_prefs.dart';
 import 'package:taski/services/folders_repository.dart';
 import 'package:taski/services/friends_service.dart';
 import 'package:taski/services/notification_service.dart';
+import 'package:taski/services/supabase_client.dart';
 import 'package:taski/theme/task_colors.dart';
 import 'package:taski/widgets/confirm_dialog.dart';
+import 'package:taski/widgets/invite_friends_dialog.dart';
 import 'package:taski/widgets/theme_toggle.dart';
 import 'package:taski/widgets/timer_card.dart';
 import 'package:taski/widgets/top_toast.dart';
+import 'package:taski/widgets/weekly_summary_dialog.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -28,17 +32,28 @@ class _HomePageState extends State<HomePage> {
   final _repo = FoldersRepository();
   final _auth = AuthService();
   final _friends = FriendsService();
+  final _colorPrefs = FolderColorPrefs();
   // Live stream of folders (+ their tasks) from local SQLite.
   late final Stream<List<Folder>> _foldersStream = _repo.watchAll();
   bool _hasPendingRequests = false;
   final Set<String> _knownRequestIds = {};
+  // Personal color overrides for public folders (folderId → hex).
+  Map<String, String> _publicColors = {};
   Timer? _ticker;
   Timer? _friendsPoller;
+
+  String? get _myId => supabase.auth.currentUser?.id;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _welcome());
+    _colorPrefs.loadAll().then((m) {
+      if (mounted) setState(() => _publicColors = m);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _welcome();
+      _maybeShowWeeklySummary();
+    });
     // Rebuild every second so a folder's timer fill animates.
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
@@ -92,6 +107,44 @@ class _HomePageState extends State<HomePage> {
     final name = await _auth.currentName();
     if (!mounted) return;
     showTopToast(context, 'Welcome ${name ?? ''}'.trim());
+  }
+
+  /// Once per week (the first app open after a new week starts), show a
+  /// celebratory summary of the week that just ended.
+  Future<void> _maybeShowWeeklySummary() async {
+    // Monday of this week, then back up 7 days = start of the week that ended.
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final thisWeekStart = today.subtract(Duration(days: today.weekday - 1));
+    final lastWeekStart = thisWeekStart.subtract(const Duration(days: 7));
+    final key = lastWeekStart.toIso8601String().split('T').first;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getString('weeklySummaryShown') == key) return; // already shown
+
+    try {
+      final entries = await _friends.leaderboard('last_week');
+      // Mark as handled regardless, so it only triggers once per week.
+      await prefs.setString('weeklySummaryShown', key);
+      var myCount = 0;
+      for (final e in entries) {
+        if (e.userId == _myId) {
+          myCount = e.completedCount;
+          break;
+        }
+      }
+      if (myCount == 0 || !mounted) return; // nothing to celebrate
+      await showDialog<void>(
+        context: context,
+        builder: (_) => WeeklySummaryDialog(
+          myCount: myCount,
+          entries: entries,
+          myId: _myId,
+        ),
+      );
+    } catch (_) {
+      // Offline / transient — try again next launch (key not set on failure).
+    }
   }
 
   Future<String?> _prompt(String title, {String? initial}) {
@@ -182,11 +235,27 @@ class _HomePageState extends State<HomePage> {
   Future<void> _showInviteDialog(String folderId) async {
     await showDialog<void>(
       context: context,
-      builder: (_) => _InviteFriendsDialog(folderId: folderId),
+      builder: (_) => InviteFriendsDialog(folderId: folderId),
     );
   }
 
   Future<void> _renameFolder(Folder folder) async {
+    // Only the owner can rename a public folder.
+    if (folder.isPublic && folder.ownerId != _myId) {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          content: const Text('Only owner of this Folder can rename'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
     final name = await _prompt('Rename folder', initial: folder.name);
     if (name == null) return;
     await _repo.rename(folder.id, name);
@@ -197,7 +266,20 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _setColor(Folder folder, String? color) async {
-    await _repo.setColor(folder.id, color);
+    if (folder.isPublic) {
+      // Personal, local color for the shared folder.
+      await _colorPrefs.setColor(folder.id, color);
+      if (!mounted) return;
+      setState(() {
+        if (color == null) {
+          _publicColors.remove(folder.id);
+        } else {
+          _publicColors[folder.id] = color;
+        }
+      });
+    } else {
+      await _repo.setColor(folder.id, color);
+    }
   }
 
   /// Opened by holding a folder. Shown centered; Delete is set apart below.
@@ -226,25 +308,43 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 12),
           const Divider(height: 1),
           const SizedBox(height: 12),
-          ListTile(
-            leading: const Icon(Icons.delete, color: Colors.red),
-            title: const Text('Delete', style: TextStyle(color: Colors.red)),
-            onTap: () async {
-              Navigator.pop(context);
-              if (await confirmDialog(
-                context,
-                message: 'Delete this folder and its tasks?',
-              )) {
-                _deleteFolder(folder);
-              }
-            },
-          ),
+          // A non-owner of a public folder leaves it (delete only for them);
+          // owners (and private folders) actually delete.
+          if (folder.isPublic && folder.ownerId != _myId)
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text('Leave', style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                Navigator.pop(context);
+                if (await confirmDialog(context, message: 'Leave this folder?')) {
+                  await _friends.leaveFolder(folder.id);
+                }
+              },
+            )
+          else
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text('Delete', style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                Navigator.pop(context);
+                if (await confirmDialog(
+                  context,
+                  message: 'Delete this folder and its tasks?',
+                )) {
+                  _deleteFolder(folder);
+                }
+              },
+            ),
         ],
       ),
     );
   }
 
   Future<void> _pickColor(Folder folder) async {
+    // Public folders use the brighter palette + the personal color; private
+    // folders use the pastel palette + the shared color.
+    final palette = folder.isPublic ? kPublicFolderColors : kTaskColors;
+    final current = folder.isPublic ? _publicColors[folder.id] : folder.color;
     await showDialog<void>(
       context: context,
       builder: (_) => AlertDialog(
@@ -255,7 +355,7 @@ class _HomePageState extends State<HomePage> {
             spacing: 12,
             runSpacing: 12,
             children: [
-              for (final hex in kTaskColors)
+              for (final hex in palette)
                 GestureDetector(
                   onTap: () {
                     Navigator.pop(context);
@@ -267,11 +367,11 @@ class _HomePageState extends State<HomePage> {
                     decoration: BoxDecoration(
                       color: colorFromHex(hex),
                       shape: BoxShape.circle,
-                      border: folder.color == hex
+                      border: current == hex
                           ? Border.all(color: Colors.black, width: 3)
                           : Border.all(color: Colors.black12),
                     ),
-                    child: folder.color == hex
+                    child: current == hex
                         ? const Icon(Icons.check, size: 20)
                         : null,
                   ),
@@ -368,16 +468,19 @@ class _HomePageState extends State<HomePage> {
               itemBuilder: (_, i) {
                 final f = folders[i];
                 final done = f.tasks.where((t) => t.completed).length;
-                final base = f.color != null ? colorFromHex(f.color!) : null;
+                // Public folders use a personal (local) color; private use the
+                // shared folders.color.
+                final colorHex = f.isPublic ? _publicColors[f.id] : f.color;
+                final base = colorHex != null ? colorFromHex(colorHex) : null;
                 final timerTask = f.activeTimerTask;
                 final active = timerTask != null;
                 final progress = active ? timerTask.timerProgress() : null;
                 final hasCustomColor = base != null;
-                // Coloured folders keep light-mode (dark) text so the pastel
-                // background stays readable even in dark mode.
+                // Pick black/white text for contrast on the (possibly bright)
+                // banner color.
                 final textColor = active
                     ? Colors.white
-                    : (hasCustomColor ? Colors.black : null);
+                    : (hasCustomColor ? textColorOn(base) : null);
                 return RawGestureDetector(
                   gestures: {
                     LongPressGestureRecognizer:
@@ -443,100 +546,6 @@ class _HomePageState extends State<HomePage> {
         onPressed: _onAddPressed,
         child: const Icon(Icons.add),
       ),
-    );
-  }
-}
-
-/// Dialog listing the user's friends, each with an Invite button, for adding
-/// them to a public folder.
-class _InviteFriendsDialog extends StatefulWidget {
-  final String folderId;
-  const _InviteFriendsDialog({required this.folderId});
-
-  @override
-  State<_InviteFriendsDialog> createState() => _InviteFriendsDialogState();
-}
-
-class _InviteFriendsDialogState extends State<_InviteFriendsDialog> {
-  final _service = FriendsService();
-  List<Friend> _friends = [];
-  bool _loading = true;
-  final Set<String> _invited = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final friends = await _service.myFriends();
-      if (!mounted) return;
-      setState(() {
-        _friends = friends;
-        _loading = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _invite(Friend f) async {
-    setState(() => _invited.add(f.userId));
-    try {
-      await _service.inviteToFolder(widget.folderId, f.username);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _invited.remove(f.userId));
-      // Surface the real reason (e.g. not_owner → folder not synced yet).
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Invite failed: $e')),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Invite friends'),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: _loading
-            ? const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            : _friends.isEmpty
-            ? const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('No friends yet. Add some from the Friends page.'),
-              )
-            : ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final f in _friends)
-                    ListTile(
-                      title: Text(f.username),
-                      trailing: _invited.contains(f.userId)
-                          ? const Text(
-                              'Invited',
-                              style: TextStyle(color: Colors.green),
-                            )
-                          : TextButton(
-                              onPressed: () => _invite(f),
-                              child: const Text('Invite'),
-                            ),
-                    ),
-                ],
-              ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Done'),
-        ),
-      ],
     );
   }
 }

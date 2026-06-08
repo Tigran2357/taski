@@ -21,6 +21,25 @@ version: 1.0.0+1
 environment:
   sdk: ^3.12.0
 
+
+
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/icon.png"
+  # Optional Android adaptive icon (recommended for modern Android):
+  adaptive_icon_background: "#0F1726"   # your dark theme color, or any hex
+  adaptive_icon_foreground: "assets/icon/icon.png"
+  remove_alpha_ios: true
+
+
+
+
+
+
+
+
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
 # consider running `flutter pub upgrade --major-versions`. Alternatively,
@@ -47,6 +66,8 @@ dependencies:
   firebase_core: ^4.10.0
   firebase_messaging: ^16.3.0
   uuid: ^4.5.3
+  animated_reorderable_list: ^1.3.0
+  confetti: ^0.8.0
 
 
 dev_dependencies:
@@ -59,6 +80,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

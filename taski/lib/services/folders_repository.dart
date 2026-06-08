@@ -31,8 +31,11 @@ class FoldersRepository {
           debugPrint('PS: watchAll emitted ${folderRows.length} folder rows');
           final folders = <Folder>[];
           for (final fr in folderRows) {
+            // Same ordering as TasksRepository.watch so opening a folder
+            // doesn't re-sort (incomplete first/newest, completed at bottom).
             final taskRows = await db.getAll(
-              'SELECT * FROM tasks WHERE folder_id = ? ORDER BY created_at',
+              'SELECT * FROM tasks WHERE folder_id = ? '
+              'ORDER BY completed ASC, created_at DESC',
               [fr['id']],
             );
             folders.add(

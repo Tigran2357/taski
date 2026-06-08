@@ -28,6 +28,10 @@ class Task {
   final String? creatorName;
   final DateTime? createdAt;
 
+  /// Who completed it and when (shown once checked, in shared folders).
+  final String? completedByName;
+  final DateTime? completedAt;
+
   Task({
     required this.id,
     required this.folderId,
@@ -41,6 +45,8 @@ class Task {
     this.timerRemainingSeconds,
     this.creatorName,
     this.createdAt,
+    this.completedByName,
+    this.completedAt,
   });
 
   bool get hasTimer => timerTotalSeconds != null;
@@ -102,5 +108,7 @@ class Task {
     timerRemainingSeconds: _parseInt(map['timer_remaining_seconds']),
     creatorName: map['creator_name'] as String?,
     createdAt: _parseDate(map['created_at']),
+    completedByName: map['completed_by_name'] as String?,
+    completedAt: _parseDate(map['completed_at']),
   );
 }

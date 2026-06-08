@@ -26,6 +26,7 @@ final schema = Schema([
     Column.text('archived_at'),
     Column.text('completed_at'),
     Column.text('creator_name'),
+    Column.text('completed_by_name'),
   ]),
   Table('folders', [
     Column.text('name'),
@@ -38,5 +39,12 @@ final schema = Schema([
     Column.text('folder_id'),
     Column.text('user_id'),
     Column.text('joined_at'),
+  ]),
+  Table('folder_events', [
+    Column.text('folder_id'),
+    Column.text('user_id'),
+    Column.text('username'),
+    Column.text('type'),
+    Column.text('created_at'),
   ]),
 ]);
